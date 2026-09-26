@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escáner - Material Menor</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    background: #1c1517;
+    color: #f2e9e7;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px;
+    min-height: 100vh;
+    box-sizing: border-box;
+  }
+  h1 { font-size: 1.15rem; margin: 8px 0 16px; text-align: center; }
+  #lector, #contenedorVideo {
+    width: 100%;
+    max-width: 380px;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #000;
+  }
+  video { width: 100%; display: block; }
+  canvas { display: none; }
+  button {
+    margin-top: 16px;
+    padding: 13px 22px;
+    border: none;
+    border-radius: 10px;
+    background: #7c2d3d;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secundario { background: #444; }
+  #mensaje { margin-top: 14px; font-size: 0.9rem; color: #ccc; text-align: center; max-width: 320px; }
+  #previa {
+    max-width: 380px;
+    width: 100%;
+    border-radius: 14px;
+    margin-top: 4px;
+    display: none;
+  }
+  .fila-botones { display: flex; gap: 10px; }
+  input[type=file] { margin-top: 20px; color: #f2e9e7; max-width: 300px; }
+</style>
+</head>
+<body>
+  <h1 id="titulo">Cargando...</h1>
+  <div id="lector" style="display:none;"></div>
+  <div id="contenedorVideo" style="display:none;">
+    <video id="video" autoplay playsinline muted></video>
+  </div>
+  <canvas id="canvas"></canvas>
+  <img id="previa" alt="Vista previa">
+  <div class="fila-botones" id="botonesFoto" style="display:none;">
+    <button id="btnCapturar">📷 Capturar</button>
+  </div>
+  <div class="fila-botones" id="botonesConfirmar" style="display:none;">
+    <button id="btnReintentar" class="secundario">Repetir</button>
+    <button id="btnUsarFoto">Usar esta foto</button>
+  </div>
+  <input id="inputArchivo" type="file" accept="image/*" capture="environment" style="display:none;">
+  <p id="mensaje"></p>
+
+<script>
+  // Esta pagina vive FUERA de Apps Script (en GitHub Pages), por eso
+  // puede pedir la camara con normalidad. Le devuelve el resultado a
+  // la ventana que la abrio (la app de Material Menor) usando
+  // postMessage, y luego se cierra sola.
+
+  const params = new URLSearchParams(window.location.search);
+  const modo = params.get('modo') || 'qr';
+  const titulo = document.getElementById('titulo');
+  const mensaje = document.getElementById('mensaje');
+
+  function enviarAlOpener(data) {
+    if (window.opener) {
+      window.opener.postMessage(data, '*');
+    }
+    mensaje.textContent = 'Listo. Cerrando...';
+    setTimeout(function () { window.close(); }, 500);
+  }
+
+  if (modo === 'qr') {
+    iniciarModoQR();
+  } else {
+    iniciarModoFoto();
+  }
+
+  // ---------------- MODO QR ----------------
+  function iniciarModoQR() {
+    titulo.textContent = 'Escanear código QR';
+    document.getElementById('lector').style.display = 'block';
+
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
+    script.onload = function () {
+      const lector = new Html5Qrcode('lector');
+      lector.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: 240 },
+        function (textoDecodificado) {
+          lector.stop().catch(function () {});
+          enviarAlOpener({ tipo: 'qr-detectado', uid: textoDecodificado });
+        },
+        function () { /* sin QR en este frame, se ignora */ }
+      ).catch(function (err) {
+        mensaje.textContent = 'No se pudo abrir la cámara: ' + err;
+      });
+    };
+    script.onerror = function () {
+      mensaje.textContent = 'No se pudo cargar la librería de escaneo. Revisa tu conexión a internet.';
+    };
+    document.head.appendChild(script);
+  }
+
+  // ---------------- MODO FOTO ----------------
+  function iniciarModoFoto() {
+    titulo.textContent = 'Tomar foto del material';
+    let streamActivo = null;
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const previa = document.getElementById('previa');
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      mostrarRespaldoArchivo('Tu navegador no soporta cámara en vivo aquí. Usa el botón de abajo.');
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      .then(function (stream) {
+        streamActivo = stream;
+        video.srcObject = stream;
+        document.getElementById('contenedorVideo').style.display = 'block';
+        document.getElementById('botonesFoto').style.display = 'flex';
+      })
+      .catch(function () {
+        mostrarRespaldoArchivo('No se pudo abrir la cámara en vivo. Usa el botón de abajo (abre la cámara del sistema).');
+      });
+
+    document.getElementById('btnCapturar').addEventListener('click', function () {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      previa.src = canvas.toDataURL('image/jpeg', 0.8);
+      previa.style.display = 'block';
+      document.getElementById('contenedorVideo').style.display = 'none';
+      document.getElementById('botonesFoto').style.display = 'none';
+      document.getElementById('botonesConfirmar').style.display = 'flex';
+    });
+
+    document.getElementById('btnReintentar').addEventListener('click', function () {
+      previa.style.display = 'none';
+      document.getElementById('contenedorVideo').style.display = 'block';
+      document.getElementById('botonesFoto').style.display = 'flex';
+      document.getElementById('botonesConfirmar').style.display = 'none';
+    });
+
+    document.getElementById('btnUsarFoto').addEventListener('click', function () {
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const base64 = dataUrl.split(',')[1];
+      if (streamActivo) streamActivo.getTracks().forEach(function (t) { t.stop(); });
+      enviarAlOpener({ tipo: 'foto-capturada', base64: base64, mimeType: 'image/jpeg' });
+    });
+
+    function mostrarRespaldoArchivo(texto) {
+      mensaje.textContent = texto;
+      document.getElementById('inputArchivo').style.display = 'block';
+    }
+
+    document.getElementById('inputArchivo').addEventListener('change', function () {
+      const archivo = this.files[0];
+      if (!archivo) return;
+      const lector = new FileReader();
+      lector.onload = function () {
+        const base64 = lector.result.split(',')[1];
+        enviarAlOpener({ tipo: 'foto-capturada', base64: base64, mimeType: archivo.type });
+      };
+      lector.readAsDataURL(archivo);
+    });
+  }
+</script>
+</body>
+</html>
